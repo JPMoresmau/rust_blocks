@@ -214,16 +214,7 @@ const MILLIS_PER_UPDATE: u64 = (1.0 / UPDATES_PER_SECOND * 1000.0) as u64;
 pub const WIDTH: f32= 800.0;
 pub const HEIGHT: f32= 450.0;
 
-pub const BLOCK_WIDTH: f32= 40.0;
-pub const BLOCK_HEIGHT: f32= 20.0;
 
-pub const PADDLE_WIDTH: f32= 80.0;
-pub const PADDLE_HEIGHT: f32= 20.0;
-
-pub const PADDLE_INNERWIDTH: f32= 60.0;
-
-pub const LIMIT_LEFT:f32 = PADDLE_WIDTH/2.0+10.0;
-pub const LIMIT_RIGHT:f32 =WIDTH-PADDLE_WIDTH/2.0-10.0;
 
 pub const LIGHTGRAY: graphics::Color = graphics::Color {
     r: 0.83,
