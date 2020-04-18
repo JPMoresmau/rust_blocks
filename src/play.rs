@@ -4,6 +4,7 @@ use ggez::event;
 use ggez::graphics;
 use ggez::nalgebra as na;
 use ggez::{Context, GameResult};
+use ggez::audio::{Source,SoundSource};
 
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
@@ -53,6 +54,8 @@ impl Hash for Block {
 pub struct PlayState {
     help_text: graphics::Text,
     font: graphics::Font,
+    block_sound: Option<Source>,
+    paddle_sound: Option<Source>,
     mode: PlayMode,
     blocks: HashSet<Block>,
     paddle: f32,
@@ -81,10 +84,12 @@ impl PlayState {
         }
 
         let help_text = graphics::Text::new(("Press <SPACE> to launch the ball", font, 18.0));
-
+        
         Self {
             help_text,
             font,
+            block_sound: Option::None,
+            paddle_sound: Option::None,
             mode: PlayMode::Pending,
             blocks,
             paddle: WIDTH / 2.0,
@@ -121,6 +126,9 @@ impl PlayState {
             && bx + BALL_RADIUS >= self.paddle - PADDLE_WIDTH / 2.0 - 10.0
             && bx - BALL_RADIUS <= self.paddle + PADDLE_WIDTH / 2.0 + 10.0
         {
+            if let Some(bs) = &mut self.paddle_sound {
+                bs.play().unwrap_or_else(|e| println!("Cannot play sound:{}",e));
+            }
             let ratio = (bx - self.paddle) / 20.0;
             self.ball_speed.1 = -self.ball_speed.1;
             if ratio != 0.0 {
@@ -156,6 +164,11 @@ impl PlayState {
                 }
                 true
             });
+            if sc>0{
+                if let Some(bs) = &mut self.block_sound {
+                    bs.play().unwrap_or_else(|e| println!("Cannot play sound:{}",e));
+                }
+            }
             match bounce {
                 Bounce::Bottom => {
                     self.ball_speed.1 = -self.ball_speed.1;
@@ -180,7 +193,11 @@ impl PlayState {
 }
 
 impl event::EventHandler for PlayState {
-    fn update(&mut self, _ctx: &mut Context) -> GameResult {
+    fn update(&mut self, ctx: &mut Context) -> GameResult {
+        if self.block_sound.is_none(){
+            self.block_sound = Option::Some(Source::new(ctx, "/321585__waxxman__bip.mp3")?);
+            self.paddle_sound = Option::Some(Source::new(ctx, "/399196__spiceprogram__perc-bip.wav")?);
+        }
         if self.mode == PlayMode::Running {
             self.ball.0 += self.ball_speed.0;
             self.ball.1 += self.ball_speed.1;

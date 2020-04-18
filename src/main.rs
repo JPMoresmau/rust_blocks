@@ -178,6 +178,7 @@ struct MainState {
     inner_state: Vec<Box<dyn InnerState>>,
 }
 
+
 impl MainState {
     fn new(ctx: &mut Context) -> GameResult<MainState> {
         let font = graphics::Font::new(ctx, "/PixelEmulator-xq08.ttf")?;
