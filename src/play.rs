@@ -1,3 +1,4 @@
+//! Game play
 use ggez;
 
 use ggez::event;
@@ -6,11 +7,10 @@ use ggez::nalgebra as na;
 use ggez::{Context, GameResult};
 use ggez::audio::{Source,SoundSource};
 
-use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
-
 use super::*;
+use crate::level::*;
 
+// Different modes this play screen can be in
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 enum PlayMode {
     Pending,
@@ -19,6 +19,7 @@ enum PlayMode {
     Won,
 }
 
+// Bounce direction on a block
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 enum Bounce {
     Bottom,
@@ -28,61 +29,26 @@ enum Bounce {
     None,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Block {
-    i: i32,
-    j: i32,
-    rect: graphics::Rect,
-    fill: graphics::Color,
-    stroke: graphics::Color
-}
-
-impl PartialEq for Block {
-    fn eq(&self, other: &Self) -> bool {
-        self.i == other.i && self.j == other.j
-    }
-}
-impl Eq for Block {}
-
-impl Hash for Block {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.i.hash(state);
-        self.j.hash(state);
-    }
-}
-
+// Full play state
 pub struct PlayState {
-    help_text: graphics::Text,
-    font: graphics::Font,
-    block_sound: Option<Source>,
-    paddle_sound: Option<Source>,
-    mode: PlayMode,
-    blocks: HashSet<Block>,
-    paddle: f32,
-    ball: (f32, f32),
-    speed: (f32, f32),
-    ball_speed: (f32, f32),
-    score: u32,
+    help_text: graphics::Text,    // help text
+    font: graphics::Font,         // font for text
+    block_sound: Option<Source>,  // sound when hitting a block
+    paddle_sound: Option<Source>, // sound when hitting the paddle
+    mode: PlayMode,  // current mode
+    level: Level, // level definition
+    paddle: f32, // paddle x position
+    ball: (f32, f32), // ball position
+    speed: (f32, f32), // paddle speed (left/right)
+    ball_speed: (f32, f32), // ball speed vector
+    score: u32, // user score
 }
 
 impl PlayState {
-    pub fn new(font: graphics::Font) -> Self {
-        let mut blocks = HashSet::new();
-        for i in 0..20 {
-            for j in 0..5 {
-                let minx = (i as f32) * BLOCK_WIDTH;
-                let miny = (j as f32) * BLOCK_HEIGHT;
-                let color = if i % 2 == j % 2 { GRAY } else { DARKGRAY };
-                blocks.insert(Block {
-                    i,
-                    j,
-                    rect: graphics::Rect::new(minx, miny, BLOCK_WIDTH, BLOCK_HEIGHT),
-                    fill:color,
-                    stroke:graphics::BLACK,
-                });
-            }
-        }
-
+    // new play state, using level at given index
+    pub fn new(font: graphics::Font, index: u32, score: u32) -> Self {
+        let level = next_level(index);
+        let speed = level.ball_speed;
         let help_text = graphics::Text::new(("Press <SPACE> to launch the ball", font, 18.0));
         
         Self {
@@ -91,15 +57,16 @@ impl PlayState {
             block_sound: Option::None,
             paddle_sound: Option::None,
             mode: PlayMode::Pending,
-            blocks,
+            level,
             paddle: WIDTH / 2.0,
             ball: (WIDTH / 2.0, 390.0),
             speed: (1.0, 1.0),
-            ball_speed: (0.0, -BALL_SPEED),
-            score: 0,
+            ball_speed: (0.0, -speed),
+            score,
         }
     }
 
+    // draw a single block
     fn draw_block(mb: &mut graphics::MeshBuilder, block: &Block) {
         mb.rectangle(
             graphics::DrawMode::Fill(graphics::FillOptions::default()),
@@ -113,14 +80,20 @@ impl PlayState {
         );
     }
 
+    // calculate collision of ball with walls, blocks and paddle
     fn collision(&mut self) {
         let (bx, by) = self.ball;
+        let ball_speed = self.level.ball_speed;
+        // vertical wall collision
         if bx - BALL_RADIUS <= 0.0 || bx + BALL_RADIUS >= WIDTH {
             self.ball_speed.0 = -self.ball_speed.0;
+        // top wall collision
         } else if by - BALL_RADIUS <= 0.0 {
             self.ball_speed.1 = -self.ball_speed.1;
+        // ball falls below paddle, lost!
         } else if by + BALL_RADIUS > 420.0 {
             self.mode = PlayMode::Lost;
+        // paddle collision
         } else if self.ball_speed.1 > 0.0
             && by + BALL_RADIUS > 400.0
             && bx + BALL_RADIUS >= self.paddle - PADDLE_WIDTH / 2.0 - 10.0
@@ -129,26 +102,29 @@ impl PlayState {
             if let Some(bs) = &mut self.paddle_sound {
                 bs.play().unwrap_or_else(|e| println!("Cannot play sound:{}",e));
             }
+            // calculate how to adapt the bounce according to the position of contact
             let ratio = (bx - self.paddle) / 20.0;
             self.ball_speed.1 = -self.ball_speed.1;
             if ratio != 0.0 {
                 self.ball_speed.0 = (self.ball_speed.0 + ratio)
-                    .min(BALL_SPEED - 0.1)
-                    .max(-BALL_SPEED + 0.1);
+                    .min(ball_speed - 0.1)
+                    .max(-ball_speed + 0.1);
                 self.ball_speed.1 =
-                    -(BALL_SPEED * BALL_SPEED - self.ball_speed.0 * self.ball_speed.0).sqrt();
+                    -(ball_speed * ball_speed - self.ball_speed.0 * self.ball_speed.0).sqrt();
             }
         } else {
             let (bsx, bsy) = self.ball_speed;
             let mut bounce = Bounce::None;
             let mut sc = 0;
+            // approximate ball by rectangle
             let ball_rect = graphics::Rect::new(
                 bx - BALL_RADIUS,
                 by - BALL_RADIUS,
                 BALL_RADIUS * 2.0,
                 BALL_RADIUS * 2.0,
             );
-            self.blocks.retain(|b| {
+            // calculate hit blocks
+            self.level.blocks.retain(|b| {
                 if b.rect.overlaps(&ball_rect) {
                     if bsy < 0.0 && by > b.rect.y + b.rect.h {
                         bounce = Bounce::Bottom;
@@ -185,7 +161,7 @@ impl PlayState {
                 _ => {}
             }
             self.score += sc;
-            if self.blocks.is_empty() {
+            if self.level.blocks.is_empty() {
                 self.mode = PlayMode::Won;
             }
         }
@@ -194,10 +170,12 @@ impl PlayState {
 
 impl event::EventHandler for PlayState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
+        // load sounds now that we have a context to do so
         if self.block_sound.is_none(){
             self.block_sound = Option::Some(Source::new(ctx, "/321585__waxxman__bip.mp3")?);
             self.paddle_sound = Option::Some(Source::new(ctx, "/399196__spiceprogram__perc-bip.wav")?);
         }
+        // update ball and calculate collisions
         if self.mode == PlayMode::Running {
             self.ball.0 += self.ball_speed.0;
             self.ball.1 += self.ball_speed.1;
@@ -209,9 +187,10 @@ impl event::EventHandler for PlayState {
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         graphics::clear(ctx, LIGHTGRAY);
         let mb = &mut graphics::MeshBuilder::new();
-        for b in self.blocks.iter() {
+        for b in self.level.blocks.iter() {
             PlayState::draw_block(mb, b);
         }
+        // draw the paddle
         let rect = graphics::Rect::new(
             self.paddle - PADDLE_INNERWIDTH / 2.0,
             400.0,
@@ -256,6 +235,7 @@ impl event::EventHandler for PlayState {
             DARKGRAY,
         );
 
+        // draw the ball
         if self.mode != PlayMode::Lost {
             mb.circle(
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
@@ -276,12 +256,14 @@ impl event::EventHandler for PlayState {
         let m = mb.build(ctx)?;
         graphics::draw(ctx, &m, graphics::DrawParam::new())?;
 
+        // draw help text
         if self.mode == PlayMode::Pending {
             let (w, _h) = self.help_text.dimensions(ctx);
             let dest_point = na::Point2::new(WIDTH / 2.0 - (w as f32 / 2.0), 426.0);
             graphics::draw(ctx, &self.help_text, (dest_point, DARKGRAY))?;
         }
 
+        // draw score
         let score_text = graphics::Text::new((format!("Score: {}",self.score), self.font, 18.0));
         graphics::draw(ctx, &score_text, (na::Point2::new(5.0,426.0), DARKGRAY))?;
         Ok(())
@@ -301,6 +283,7 @@ impl event::EventHandler for PlayState {
             event::KeyCode::Left if self.mode != PlayMode::Lost => {
                 self.speed.1 = 1.0;
                 if self.paddle > LIMIT_LEFT {
+                    // repeat press increases speed
                     if repeat {
                         self.speed.0 *= 1.2;
                     } else {
@@ -308,6 +291,7 @@ impl event::EventHandler for PlayState {
                     }
                     let mut delta = PADDLE_SPEED * self.speed.0;
                     self.paddle -= delta;
+                    // stay in bounds
                     if self.paddle < LIMIT_LEFT {
                         delta -= LIMIT_LEFT - self.paddle;
                         self.paddle = LIMIT_LEFT;
@@ -320,6 +304,7 @@ impl event::EventHandler for PlayState {
             event::KeyCode::Right if self.mode != PlayMode::Lost => {
                 self.speed.0 = 1.0;
                 if self.paddle < LIMIT_RIGHT {
+                     // repeat press increases speed
                     if repeat {
                         self.speed.1 *= 1.2;
                     } else {
@@ -328,6 +313,7 @@ impl event::EventHandler for PlayState {
 
                     let mut delta = PADDLE_SPEED * self.speed.1;
                     self.paddle += delta;
+                    // stay in bounds
                     if self.paddle > LIMIT_RIGHT {
                         delta -= self.paddle - LIMIT_RIGHT;
                         self.paddle = LIMIT_RIGHT;
@@ -354,14 +340,12 @@ impl InnerState for PlayState {
         if self.mode == PlayMode::Lost {
             return Transition::Replace(Box::new(EndState::new("GAME OVER",font)));
         } else if self.mode == PlayMode::Won {
-            return Transition::Replace(Box::new(EndState::new("YOU WIN!",font)));
+            return Transition::Replace(Box::new(PlayState::new(font,self.level.index+1,self.score)));
         }
         Transition::None
     }
 }
 
-pub const BLOCK_WIDTH: f32 = 40.0;
-pub const BLOCK_HEIGHT: f32 = 20.0;
 
 pub const PADDLE_WIDTH: f32 = 80.0;
 pub const PADDLE_HEIGHT: f32 = 20.0;
@@ -373,4 +357,4 @@ pub const LIMIT_RIGHT: f32 = WIDTH - PADDLE_WIDTH / 2.0 - 10.0;
 
 const PADDLE_SPEED: f32 = 8.0;
 const BALL_RADIUS: f32 = 10.0;
-const BALL_SPEED: f32 = 3.0;
+

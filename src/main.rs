@@ -1,4 +1,4 @@
-//! Basic hello world example.
+//! Start, Pause, End screens and main loop
 
 use ggez;
 
@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 mod play;
 use play::PlayState;
 
+pub mod level;
+
+// Transition to a different game state
 enum Transition {
     Push(Box<dyn InnerState>),
     Replace(Box<dyn InnerState>),
@@ -21,14 +24,18 @@ enum Transition {
     None,
 }
 
+// Game state
 trait InnerState: event::EventHandler {
+    // transition on key press
     fn transition(&self, font: graphics::Font, keycode: event::KeyCode) -> Transition;
 
+    // transition on state change
     fn state_transition(&self, _font: graphics::Font) -> Transition {
         Transition::None
     }
 }
 
+// Starting state
 struct StartState {
     title_text: graphics::Text,
     start_text: graphics::Text,
@@ -76,12 +83,13 @@ impl event::EventHandler for StartState {
 impl InnerState for StartState {
     fn transition(&self, font: graphics::Font, keycode: event::KeyCode) -> Transition {
         if keycode == event::KeyCode::Space {
-            return Transition::Replace(Box::new(PlayState::new(font)));
+            return Transition::Replace(Box::new(PlayState::new(font, 0, 0)));
         }
         Transition::None
     }
 }
 
+// Pause State
 struct PauseState {
     title_text: graphics::Text,
     restart_text: graphics::Text,
@@ -123,6 +131,7 @@ impl InnerState for PauseState {
     }
 }
 
+// End State (usually game over since now we have infinite levels)
 struct EndState {
     title_text: graphics::Text,
     restart_text: graphics::Text,
@@ -153,8 +162,8 @@ impl event::EventHandler for EndState {
             graphics::Rect::new(dest_point.x, dest_point.y, w as f32, h as f32),
             LIGHTGRAY,
         );
-        let m= &mb.build(ctx)?;
-        graphics::draw(ctx,m, graphics::DrawParam::new())?;
+        let m = &mb.build(ctx)?;
+        graphics::draw(ctx, m, graphics::DrawParam::new())?;
         graphics::draw(ctx, &self.title_text, (dest_point, RED))?;
         let (w, _h) = self.restart_text.dimensions(ctx);
         let dest_point = na::Point2::new(WIDTH / 2.0 - (w as f32 / 2.0), 180.0);
@@ -166,25 +175,23 @@ impl event::EventHandler for EndState {
 impl InnerState for EndState {
     fn transition(&self, font: graphics::Font, keycode: event::KeyCode) -> Transition {
         if keycode == event::KeyCode::Space {
-            return Transition::Replace(Box::new(PlayState::new(font)));
+            return Transition::Replace(Box::new(PlayState::new(font, 0, 0)));
         }
         Transition::None
     }
 }
 
+// Main state
 struct MainState {
-    //frames: usize,
     font: graphics::Font,
     inner_state: Vec<Box<dyn InnerState>>,
 }
-
 
 impl MainState {
     fn new(ctx: &mut Context) -> GameResult<MainState> {
         let font = graphics::Font::new(ctx, "/PixelEmulator-xq08.ttf")?;
 
         let s = MainState {
-            //frames: 0,
             font,
             inner_state: vec![Box::new(StartState::new(font))],
         };
@@ -194,12 +201,15 @@ impl MainState {
 
 impl event::EventHandler for MainState {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
+        // update inner state
         self.inner_state.last_mut().unwrap().update(ctx)?;
+        // check for transition
         let tr = self
             .inner_state
             .last_mut()
             .unwrap()
             .state_transition(self.font);
+        // apply transition
         match tr {
             Transition::Replace(ns) => {
                 self.inner_state.pop();
@@ -220,12 +230,6 @@ impl event::EventHandler for MainState {
         self.inner_state.last_mut().unwrap().draw(ctx)?;
 
         graphics::present(ctx)?;
-
-        /*self.frames += 1;
-        if (self.frames % 100) == 0 {
-            println!("FPS: {}", ggez::timer::fps(ctx));
-        }*/
-
         Ok(())
     }
 
@@ -236,11 +240,13 @@ impl event::EventHandler for MainState {
         keymod: event::KeyMods,
         repeat: bool,
     ) {
+        // check for transition
         let tr = self
             .inner_state
             .last_mut()
             .unwrap()
             .transition(self.font, keycode);
+        // apply transition if any
         match tr {
             Transition::Replace(ns) => {
                 self.inner_state.pop();
@@ -252,6 +258,7 @@ impl event::EventHandler for MainState {
             Transition::Push(ns) => {
                 self.inner_state.push(ns);
             }
+            // no transition: notify state of key down event
             _ => {
                 self.inner_state
                     .last_mut()
@@ -262,6 +269,7 @@ impl event::EventHandler for MainState {
     }
 }
 
+// Game app entry point
 pub fn main() -> GameResult {
     let resource_dir = if let Ok(manifest_dir) = env::var("CARGO_MANIFEST_DIR") {
         let mut path = path::PathBuf::from(manifest_dir);
